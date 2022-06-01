@@ -31,12 +31,3 @@ export default function About() {
     </section>
   )
 }
-
-About.getLayout = function getLayout(page) {
-  return (
-    <Layout>
-      <Sidebar />
-      {page}
-    </Layout>
-  )
-}
