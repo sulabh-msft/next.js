@@ -34,18 +34,35 @@ function parseModel(response, json) {
 }
 
 // eslint-disable-next-line no-unused-vars
-function resolveModuleReference(moduleData) {
+function resolveModuleReference(bundlerConfig, moduleData) {
+  if (bundlerConfig) {
+    var resolvedModuleData = bundlerConfig[moduleData.id][moduleData.name];
+
+    if (moduleData.async) {
+      return {
+        id: resolvedModuleData.id,
+        chunks: resolvedModuleData.chunks,
+        name: resolvedModuleData.name,
+        async: true
+      };
+    } else {
+      return resolvedModuleData;
+    }
+  }
+
   return moduleData;
 } // The chunk cache contains all the chunks we've preloaded so far.
 // If they're still pending they're a thenable. This map also exists
 // in Webpack but unfortunately it's not exposed so we have to
 // replicate it in user space. null means that it has already loaded.
 
-var chunkCache = new Map(); // Start preloading the modules since we might need them soon.
+var chunkCache = new Map();
+var asyncModuleCache = new Map(); // Start preloading the modules since we might need them soon.
 // This function doesn't suspend.
 
 function preloadModule(moduleData) {
   var chunks = moduleData.chunks;
+  var promises = [];
 
   for (var i = 0; i < chunks.length; i++) {
     var chunkId = chunks[i];
@@ -54,31 +71,62 @@ function preloadModule(moduleData) {
     if (entry === undefined) {
       var thenable = globalThis.__next_chunk_load__(chunkId);
 
+      promises.push(thenable);
       var resolve = chunkCache.set.bind(chunkCache, chunkId, null);
       var reject = chunkCache.set.bind(chunkCache, chunkId);
       thenable.then(resolve, reject);
       chunkCache.set(chunkId, thenable);
     }
   }
+
+  if (moduleData.async) {
+    var modulePromise = Promise.all(promises).then(function () {
+      return globalThis.__next_require__(moduleData.id);
+    });
+    modulePromise.then(function (value) {
+      modulePromise.status = 'fulfilled';
+      modulePromise.value = value;
+    }, function (reason) {
+      modulePromise.status = 'rejected';
+      modulePromise.reason = reason;
+    });
+    asyncModuleCache.set(moduleData.id, modulePromise);
+  }
 } // Actually require the module or suspend if it's not yet ready.
 // Increase priority if necessary.
 
 function requireModule(moduleData) {
-  var chunks = moduleData.chunks;
+  var moduleExports;
 
-  for (var i = 0; i < chunks.length; i++) {
-    var chunkId = chunks[i];
-    var entry = chunkCache.get(chunkId);
+  if (moduleData.async) {
+    // We assume that preloadModule has been called before, which
+    // should have added something to the module cache.
+    var promise = asyncModuleCache.get(moduleData.id);
 
-    if (entry !== null) {
-      // We assume that preloadModule has been called before.
-      // So we don't expect to see entry being undefined here, that's an error.
-      // Let's throw either an error or the Promise.
-      throw entry;
+    if (promise.status === 'fulfilled') {
+      moduleExports = promise.value;
+    } else if (promise.status === 'rejected') {
+      throw promise.reason;
+    } else {
+      throw promise;
     }
-  }
+  } else {
+    var chunks = moduleData.chunks;
 
-  var moduleExports = globalThis.__next_require__(moduleData.id);
+    for (var i = 0; i < chunks.length; i++) {
+      var chunkId = chunks[i];
+      var entry = chunkCache.get(chunkId);
+
+      if (entry !== null) {
+        // We assume that preloadModule has been called before.
+        // So we don't expect to see entry being undefined here, that's an error.
+        // Let's throw either an error or the Promise.
+        throw entry;
+      }
+    }
+
+    moduleExports = globalThis.__next_require__(moduleData.id);
+  }
 
   if (moduleData.name === '*') {
     // This is a placeholder value that represents that the caller imported this
@@ -365,9 +413,10 @@ function parseModelTuple(response, value) {
 
   return value;
 }
-function createResponse() {
+function createResponse(bundlerConfig) {
   var chunks = new Map();
   var response = {
+    _bundlerConfig: bundlerConfig,
     _chunks: chunks,
     readRoot: readRoot
   };
@@ -391,7 +440,7 @@ function resolveModule(response, id, model) {
   var chunks = response._chunks;
   var chunk = chunks.get(id);
   var moduleMetaData = parseModel(response, model);
-  var moduleReference = resolveModuleReference(moduleMetaData); // TODO: Add an option to encode modules that are lazy loaded.
+  var moduleReference = resolveModuleReference(response._bundlerConfig, moduleMetaData); // TODO: Add an option to encode modules that are lazy loaded.
   // For now we preload all modules as early as possible since it's likely
   // that we'll need them.
 
@@ -527,11 +576,11 @@ function createFromJSONCallback(response) {
   };
 }
 
-function createResponse$1() {
+function createResponse$1(bundlerConfig) {
   // NOTE: CHECK THE COMPILER OUTPUT EACH TIME YOU CHANGE THIS.
   // It should be inlined to one object literal but minor changes can break it.
   var stringDecoder =  createStringDecoder() ;
-  var response = createResponse();
+  var response = createResponse(bundlerConfig);
   response._partialRow = '';
 
   {
@@ -567,14 +616,14 @@ function startReadingFromStream(response, stream) {
   reader.read().then(progress, error);
 }
 
-function createFromReadableStream(stream) {
-  var response = createResponse$1();
+function createFromReadableStream(stream, options) {
+  var response = createResponse$1(options && options.moduleMap ? options.moduleMap : null);
   startReadingFromStream(response, stream);
   return response;
 }
 
-function createFromFetch(promiseForResponse) {
-  var response = createResponse$1();
+function createFromFetch(promiseForResponse, options) {
+  var response = createResponse$1(options && options.moduleMap ? options.moduleMap : null);
   promiseForResponse.then(function (r) {
     startReadingFromStream(response, r.body);
   }, function (e) {
@@ -583,8 +632,8 @@ function createFromFetch(promiseForResponse) {
   return response;
 }
 
-function createFromXHR(request) {
-  var response = createResponse$1();
+function createFromXHR(request, options) {
+  var response = createResponse$1(options && options.moduleMap ? options.moduleMap : null);
   var processedLength = 0;
 
   function progress(e) {

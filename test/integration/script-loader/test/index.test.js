@@ -8,12 +8,16 @@ import {
   stopApp,
   nextBuild,
   waitFor,
+  findPort,
+  launchApp,
+  killApp,
 } from 'next-test-utils'
 import webdriver from 'next-webdriver'
 import cheerio from 'cheerio'
 
 let appDir = join(__dirname, '../base')
 let appWithPartytownMissingDir = join(__dirname, '../partytown-missing')
+let appWithStrictModeDir = join(__dirname, '../strictmode')
 let server
 let appPort
 
@@ -159,7 +163,7 @@ describe('Next.js Script - Primary Strategies', () => {
       let documentBIScripts = await browser.elementsByCss(
         '[src$="scriptBeforeInteractive"]'
       )
-      expect(documentBIScripts.length).toBe(1)
+      expect(documentBIScripts.length).toBe(2)
 
       await browser.waitForElementByCss('[href="/page1"]')
       await browser.click('[href="/page1"]')
@@ -170,7 +174,7 @@ describe('Next.js Script - Primary Strategies', () => {
       documentBIScripts = await browser.elementsByCss(
         '[src$="scriptBeforeInteractive"]'
       )
-      expect(documentBIScripts.length).toBe(1)
+      expect(documentBIScripts.length).toBe(2)
     } finally {
       if (browser) await browser.close()
     }
@@ -185,6 +189,30 @@ describe('Next.js Script - Primary Strategies', () => {
       const text = await browser.elementById('text').text()
 
       expect(text).toBe('aaabbbccc')
+    } finally {
+      if (browser) await browser.close()
+    }
+  })
+
+  it('onReady fires after load event and then on every subsequent re-mount', async () => {
+    let browser
+    try {
+      browser = await webdriver(appPort, '/page8')
+
+      const text = await browser.elementById('text').text()
+
+      expect(text).toBe('aaa')
+
+      // Navigate to different page and back
+      await browser.waitForElementByCss('[href="/page9"]')
+      await browser.click('[href="/page9"]')
+      await browser.waitForElementByCss('[href="/page8"]')
+      await browser.click('[href="/page8"]')
+
+      await browser.waitForElementByCss('.container')
+      const sameText = await browser.elementById('text').text()
+
+      expect(sameText).toBe('aaa') // onReady should fire again
     } finally {
       if (browser) await browser.close()
     }
@@ -207,7 +235,6 @@ describe('Next.js Script - Primary Strategies', () => {
     let browser
     try {
       browser = await webdriver(appPort, '/page7')
-
       await waitFor(1000)
 
       const logs = await browser.log()
@@ -252,8 +279,30 @@ describe('Next.js Script - Primary Strategies', () => {
     })
     const output = stdout + stderr
 
-    expect(output.replace(/\n|\r/g, '')).toContain(
-      `It looks like you're trying to use Partytown with next/script but do not have the required package(s) installed.Please install Partytown by running:	npm install @builder.io/partytownIf you are not trying to use Partytown, please disable the experimental "nextScriptWorkers" flag in next.config.js.`
+    expect(output.replace(/\n|\r/g, '')).toMatch(
+      /It looks like you're trying to use Partytown with next\/script but do not have the required package\(s\) installed.Please install Partytown by running:.*?(npm|pnpm|yarn) (install|add) (--save-dev|--dev) @builder.io\/partytownIf you are not trying to use Partytown, please disable the experimental "nextScriptWorkers" flag in next.config.js./
     )
+  })
+})
+
+describe('Next.js Script - Strict Mode', () => {
+  let devAppPort
+  let devApp
+  // https://github.com/vercel/next.js/issues/39993
+  it('onReady should only fires once after load event in dev mode (issue #39993)', async () => {
+    let browser
+    try {
+      devAppPort = await findPort()
+      devApp = await launchApp(appWithStrictModeDir, devAppPort)
+      browser = await webdriver(devAppPort, '/onready')
+
+      // wait for jQuery to be loaded
+      await waitFor(1000)
+      expect(await browser.eval(`window.remoteScriptsOnReadyCalls`)).toBe(1)
+      expect(await browser.eval(`window.inlineScriptsOnReadyCalls`)).toBe(1)
+    } finally {
+      if (browser) await browser.close()
+      if (devApp) await killApp(devApp)
+    }
   })
 })

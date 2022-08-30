@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import type { NextRouter } from './router/router'
 import type { ParsedUrlQuery } from 'querystring'
 import type { PreviewData } from 'next/types'
+import { COMPILER_NAMES } from './constants'
 
 export type NextComponentType<
   C extends BaseContext = NextPageContext,
@@ -47,7 +48,7 @@ export type NextWebVitalsMetric = {
 } & (
   | {
       label: 'web-vital'
-      name: 'FCP' | 'LCP' | 'CLS' | 'FID' | 'TTFB'
+      name: 'FCP' | 'LCP' | 'CLS' | 'FID' | 'TTFB' | 'INP'
     }
   | {
       label: 'custom'
@@ -92,7 +93,10 @@ export type NEXT_DATA = {
   autoExport?: boolean
   isFallback?: boolean
   dynamicIds?: (string | number)[]
-  err?: Error & { statusCode?: number }
+  err?: Error & {
+    statusCode?: number
+    source?: typeof COMPILER_NAMES.server | typeof COMPILER_NAMES.edgeServer
+  }
   gsp?: boolean
   gssp?: boolean
   customServer?: boolean
@@ -161,15 +165,15 @@ export type AppContextType<R extends NextRouter = NextRouter> = {
   router: R
 }
 
-export type AppInitialProps = {
-  pageProps: any
+export type AppInitialProps<P = any> = {
+  pageProps: P
 }
 
 export type AppPropsType<
   R extends NextRouter = NextRouter,
   P = {}
-> = AppInitialProps & {
-  Component: NextComponentType<NextPageContext, any, P>
+> = AppInitialProps<P> & {
+  Component: NextComponentType<NextPageContext, any, any>
   router: R
   __N_SSG?: boolean
   __N_SSP?: boolean
@@ -252,11 +256,21 @@ export type NextApiResponse<T = any> = ServerResponse & {
        * when the client shuts down (browser is closed).
        */
       maxAge?: number
+      /**
+       * Specifies the path for the preview session to work under. By default,
+       * the path is considered the "default path", i.e., any pages under "/".
+       */
+      path?: string
     }
   ) => NextApiResponse<T>
   clearPreviewData: () => NextApiResponse<T>
 
-  unstable_revalidate: (
+  /**
+   * @deprecated `unstable_revalidate` has been renamed to `revalidate`
+   */
+  unstable_revalidate: () => void
+
+  revalidate: (
     urlPath: string,
     opts?: {
       unstable_onlyGenerated?: boolean
@@ -398,11 +412,37 @@ export { warnOnce }
 export const SP = typeof performance !== 'undefined'
 export const ST =
   SP &&
-  typeof performance.mark === 'function' &&
-  typeof performance.measure === 'function'
+  (['mark', 'measure', 'getEntriesByName'] as const).every(
+    (method) => typeof performance[method] === 'function'
+  )
 
 export class DecodeError extends Error {}
 export class NormalizeError extends Error {}
+export class PageNotFoundError extends Error {
+  code: string
+
+  constructor(page: string) {
+    super()
+    this.code = 'ENOENT'
+    this.message = `Cannot find module for page: ${page}`
+  }
+}
+
+export class MissingStaticPage extends Error {
+  constructor(page: string, message: string) {
+    super()
+    this.message = `Failed to load static file for page: ${page} ${message}`
+  }
+}
+
+export class MiddlewareNotFoundError extends Error {
+  code: string
+  constructor() {
+    super()
+    this.code = 'ENOENT'
+    this.message = `Cannot find the middleware module`
+  }
+}
 
 export interface CacheFs {
   readFile(f: string): Promise<string>

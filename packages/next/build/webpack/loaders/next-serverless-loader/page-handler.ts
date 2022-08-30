@@ -8,7 +8,7 @@ import { renderToHTML } from '../../../../server/render'
 import { tryGetPreviewData } from '../../../../server/api-utils/node'
 import { denormalizePagePath } from '../../../../shared/lib/page-path/denormalize-page-path'
 import { setLazyProp, getCookieParser } from '../../../../server/api-utils'
-import { getRedirectStatus } from '../../../../lib/load-custom-routes'
+import { getRedirectStatus } from '../../../../lib/redirect-status'
 import getRouteNoAssetPath from '../../../../shared/lib/router/utils/get-route-from-asset-path'
 import { PERMANENT_REDIRECT_STATUS } from '../../../../shared/lib/constants'
 import RenderResult from '../../../../server/render-result'
@@ -253,7 +253,7 @@ export function getPageHandler(ctx: ServerlessHandlerCtx) {
       if (!fromExport && (getStaticProps || getServerSideProps)) {
         // don't include dynamic route params in query while normalizing
         // asPath
-        if (pageIsDynamic && trustQuery && defaultRouteRegex) {
+        if (pageIsDynamic && defaultRouteRegex) {
           delete (parsedUrl as any).search
 
           for (const param of Object.keys(defaultRouteRegex.groups)) {
