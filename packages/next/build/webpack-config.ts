@@ -54,6 +54,7 @@ import type {
   SWC_TARGET_TRIPLE,
 } from './webpack/plugins/telemetry-plugin'
 import type { Span } from '../trace'
+import type { MiddlewareMatcher } from './analysis/get-page-static-info'
 import { withoutRSCExtensions } from './utils'
 import browserslist from 'next/dist/compiled/browserslist'
 import loadJsConfig from './load-jsconfig'
@@ -90,7 +91,7 @@ export function getDefineEnv({
   hasReactRoot,
   isNodeServer,
   isEdgeServer,
-  middlewareRegex,
+  middlewareMatchers,
   hasServerComponents,
 }: {
   dev?: boolean
@@ -100,7 +101,7 @@ export function getDefineEnv({
   hasReactRoot?: boolean
   isNodeServer?: boolean
   isEdgeServer?: boolean
-  middlewareRegex?: string
+  middlewareMatchers?: MiddlewareMatcher[]
   config: NextConfigComplete
   hasServerComponents?: boolean
 }) {
@@ -144,8 +145,8 @@ export function getDefineEnv({
         isEdgeServer ? 'edge' : 'nodejs'
       ),
     }),
-    'process.env.__NEXT_MIDDLEWARE_REGEX': JSON.stringify(
-      middlewareRegex || ''
+    'process.env.__NEXT_MIDDLEWARE_MATCHERS': JSON.stringify(
+      middlewareMatchers || []
     ),
     'process.env.__NEXT_MANUAL_CLIENT_BASE_PATH': JSON.stringify(
       config.experimental.manualClientBasePath
@@ -195,14 +196,12 @@ export function getDefineEnv({
       path: config.images.path,
       loader: config.images.loader,
       dangerouslyAllowSVG: config.images.dangerouslyAllowSVG,
-      experimentalUnoptimized: config?.experimental?.images?.unoptimized,
-      experimentalFuture: config.experimental?.images?.allowFutureImage,
+      unoptimized: config?.images?.unoptimized,
       ...(dev
         ? {
             // pass domains in development to allow validating on the client
             domains: config.images.domains,
-            experimentalRemotePatterns:
-              config.experimental?.images?.remotePatterns,
+            remotePatterns: config.images?.remotePatterns,
           }
         : {}),
     }),
@@ -510,7 +509,7 @@ export default async function getBaseWebpackConfig(
     runWebpackSpan,
     target = COMPILER_NAMES.server,
     appDir,
-    middlewareRegex,
+    middlewareMatchers,
   }: {
     buildId: string
     config: NextConfigComplete
@@ -519,13 +518,13 @@ export default async function getBaseWebpackConfig(
     entrypoints: webpack.EntryObject
     hasReactRoot: boolean
     isDevFallback?: boolean
-    pagesDir: string
+    pagesDir?: string
     reactProductionProfiling?: boolean
     rewrites: CustomRoutes['rewrites']
     runWebpackSpan: Span
     target?: string
     appDir?: string
-    middlewareRegex?: string
+    middlewareMatchers?: MiddlewareMatcher[]
   }
 ): Promise<webpack.Configuration> {
   const isClient = compilerType === COMPILER_NAMES.client
@@ -795,24 +794,30 @@ export default async function getBaseWebpackConfig(
 
   if (dev) {
     customAppAliases[`${PAGES_DIR_ALIAS}/_app`] = [
-      ...rawPageExtensions.reduce((prev, ext) => {
-        prev.push(path.join(pagesDir, `_app.${ext}`))
-        return prev
-      }, [] as string[]),
+      ...(pagesDir
+        ? rawPageExtensions.reduce((prev, ext) => {
+            prev.push(path.join(pagesDir, `_app.${ext}`))
+            return prev
+          }, [] as string[])
+        : []),
       'next/dist/pages/_app.js',
     ]
     customAppAliases[`${PAGES_DIR_ALIAS}/_error`] = [
-      ...rawPageExtensions.reduce((prev, ext) => {
-        prev.push(path.join(pagesDir, `_error.${ext}`))
-        return prev
-      }, [] as string[]),
+      ...(pagesDir
+        ? rawPageExtensions.reduce((prev, ext) => {
+            prev.push(path.join(pagesDir, `_error.${ext}`))
+            return prev
+          }, [] as string[])
+        : []),
       'next/dist/pages/_error.js',
     ]
     customDocumentAliases[`${PAGES_DIR_ALIAS}/_document`] = [
-      ...rawPageExtensions.reduce((prev, ext) => {
-        prev.push(path.join(pagesDir, `_document.${ext}`))
-        return prev
-      }, [] as string[]),
+      ...(pagesDir
+        ? rawPageExtensions.reduce((prev, ext) => {
+            prev.push(path.join(pagesDir, `_document.${ext}`))
+            return prev
+          }, [] as string[])
+        : []),
       `next/dist/pages/_document.js`,
     ]
   }
@@ -851,7 +856,7 @@ export default async function getBaseWebpackConfig(
       ...customDocumentAliases,
       ...customRootAliases,
 
-      [PAGES_DIR_ALIAS]: pagesDir,
+      ...(pagesDir ? { [PAGES_DIR_ALIAS]: pagesDir } : {}),
       ...(appDir
         ? {
             [APP_DIR_ALIAS]: appDir,
@@ -1673,7 +1678,7 @@ export default async function getBaseWebpackConfig(
           hasReactRoot,
           isNodeServer,
           isEdgeServer,
-          middlewareRegex,
+          middlewareMatchers,
           hasServerComponents,
         })
       ),
@@ -2052,7 +2057,9 @@ export default async function getBaseWebpackConfig(
   webpackConfig = await buildConfiguration(webpackConfig, {
     supportedBrowsers,
     rootDirectory: dir,
-    customAppFile: new RegExp(escapeStringRegexp(path.join(pagesDir, `_app`))),
+    customAppFile: pagesDir
+      ? new RegExp(escapeStringRegexp(path.join(pagesDir, `_app`)))
+      : undefined,
     isDevelopment: dev,
     isServer: isNodeServer || isEdgeServer,
     isEdgeRuntime: isEdgeServer,

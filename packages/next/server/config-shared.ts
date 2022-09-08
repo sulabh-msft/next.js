@@ -5,7 +5,6 @@ import {
   ImageConfig,
   ImageConfigComplete,
   imageConfigDefault,
-  RemotePattern,
 } from '../shared/lib/image-config'
 import { ServerRuntime } from 'next/types'
 
@@ -91,6 +90,7 @@ export interface ExperimentalConfig {
   cpus?: number
   sharedPool?: boolean
   profiling?: boolean
+  proxyTimeout?: number
   isrFlushToDisk?: boolean
   workerThreads?: boolean
   pageEnv?: boolean
@@ -117,11 +117,6 @@ export interface ExperimentalConfig {
   fullySpecified?: boolean
   urlImports?: NonNullable<webpack.Configuration['experiments']>['buildHttp']
   outputFileTracingRoot?: string
-  images?: {
-    remotePatterns?: RemotePattern[]
-    unoptimized?: boolean
-    allowFutureImage?: boolean
-  }
   modularizeImports?: Record<
     string,
     {
@@ -556,6 +551,7 @@ export const defaultConfig: NextConfig = {
     isrFlushToDisk: true,
     workerThreads: false,
     pageEnv: false,
+    proxyTimeout: undefined,
     optimizeCss: false,
     nextScriptWorkers: false,
     scrollRestoration: false,
@@ -572,9 +568,6 @@ export const defaultConfig: NextConfig = {
     serverComponents: false,
     fullySpecified: false,
     outputFileTracingRoot: process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT || '',
-    images: {
-      remotePatterns: [],
-    },
     swcTraceProfiling: false,
     forceSwcTransforms: false,
     swcPlugins: undefined,
