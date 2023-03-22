@@ -1,7 +1,7 @@
 export default function Index({ time }) {
   return (
     <main>
-      <h1>SSR Caching with Next.js</h1>
+      <h1>SSR Caching with Next.js 12</h1>
       <time dateTime={time}>{time}</time>
     </main>
   )
